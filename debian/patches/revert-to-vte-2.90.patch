@@ -1,0 +1,129 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -51,7 +51,7 @@
+   gthread-2.0
+   gtk+-3.0>=3.9.10
+   granite>=0.3.0
+-  vte-2.91
++  vte-2.90
+   libnotify
+   gdk-3.0)
+ 
+@@ -81,7 +81,7 @@
+     src/Constants.vala
+     src/SearchToolbar.vala
+ PACKAGES
+-    vte-2.91
++    vte-2.90
+     granite
+     gtk+-3.0
+     libnotify
+--- a/src/SearchToolbar.vala
++++ b/src/SearchToolbar.vala
+@@ -83,7 +83,7 @@
+                 // FIXME Have a configuration menu or something.
+                 var regex = new Regex (Regex.escape_string (search_entry.text),
+                                        RegexCompileFlags.CASELESS);
+-                this.window.current_terminal.search_set_gregex (regex, 0);
++                this.window.current_terminal.search_set_gregex (regex);
+                 this.window.current_terminal.search_set_wrap_around (true);
+             } catch (RegexError er) {
+                 warning ("There was an error to compile the regex: %s", er.message);
+--- a/src/Settings.vala
++++ b/src/Settings.vala
+@@ -65,7 +65,7 @@
+         public string foreground { get; set; }
+         public string background { get; set; }
+         public string cursor_color { get; set; }
+-        public Vte.CursorShape cursor_shape { get; set; }
++        public Vte.TerminalCursorShape cursor_shape { get; set; }
+         public string palette { get; set; }
+ 
+         public string shell { get; set; }
+--- a/src/TerminalWidget.vala
++++ b/src/TerminalWidget.vala
+@@ -98,6 +98,9 @@
+ 
+             init_complete = false;
+ 
++            /* Sets characters that define word for double click selection */
++            set_word_chars ("-A-Za-z0-9/.,_~#%?:=+@");
++
+             restore_settings ();
+             settings.changed.connect (restore_settings);
+ 
+@@ -168,13 +171,14 @@
+         public void restore_settings () {
+             /* Load configuration */
+             int opacity = settings.opacity * 65535;
++            set_background_image (null);
+             set_opacity ((uint16) (opacity / 100));
+ 
+-            Gdk.RGBA background_color = Gdk.RGBA ();
+-            background_color.parse (settings.background);
++            Gdk.Color background_color;
++            Gdk.Color.parse (settings.background, out background_color);
+ 
+-            Gdk.RGBA foreground_color = Gdk.RGBA ();
+-            foreground_color.parse (settings.foreground);
++            Gdk.Color foreground_color;
++            Gdk.Color.parse (settings.foreground, out foreground_color);
+ 
+             string[] hex_palette = { "#000000", "#FF6C60", "#A8FF60", "#FFFFCC", "#96CBFE",
+                                      "#FF73FE", "#C6C5FE", "#EEEEEE", "#000000", "#FF6C60",
+@@ -193,19 +197,19 @@
+                 }
+             }
+ 
+-            Gdk.RGBA[] palette = new Gdk.RGBA[16];
++            Gdk.Color[] palette = new Gdk.Color[16];
+ 
+             for (int i = 0; i < hex_palette.length; i++) {
+-                Gdk.RGBA new_color= Gdk.RGBA();
+-                new_color.parse (hex_palette[i]);
++                Gdk.Color new_color;
++                Gdk.Color.parse (hex_palette[i], out new_color);
+ 
+                 palette[i] = new_color;
+             }
+ 
+             set_colors (foreground_color, background_color, palette);
+ 
+-            Gdk.RGBA cursor_color = Gdk.RGBA ();
+-            cursor_color.parse (settings.cursor_color);
++            Gdk.Color cursor_color;
++            Gdk.Color.parse (settings.cursor_color, out cursor_color);
+             set_color_cursor (cursor_color);
+ 
+             /* Bold font */
+@@ -263,8 +267,8 @@
+             };
+ 
+             try {
+-                this.spawn_sync (Vte.PtyFlags.DEFAULT, dir, { shell },
+-                                        envv, SpawnFlags.SEARCH_PATH, null, out this.child_pid, null);
++                this.fork_command_full (Vte.PtyFlags.DEFAULT, dir, { shell },
++                                        envv, SpawnFlags.SEARCH_PATH, null, out this.child_pid);
+             } catch (Error e) {
+                 warning (e.message);
+             }
+@@ -275,8 +279,8 @@
+                 string[]? program_with_args = null;
+                 Shell.parse_argv (program_string, out program_with_args);
+ 
+-                this.spawn_sync (Vte.PtyFlags.DEFAULT, null, program_with_args,
+-                                        null, SpawnFlags.SEARCH_PATH, null, out this.child_pid, null);
++                this.fork_command_full (Vte.PtyFlags.DEFAULT, null, program_with_args,
++                                        null, SpawnFlags.SEARCH_PATH, null, out this.child_pid);
+             } catch (Error e) {
+                 warning (e.message);
+             }
+@@ -288,7 +292,7 @@
+                 return false;
+             }
+ 
+-            int pty = get_pty().fd;
++            int pty = this.pty_object.fd;
+             int fgpid = Posix.tcgetpgrp (pty);
+ 
+             if (fgpid != this.child_pid && fgpid != -1) {
